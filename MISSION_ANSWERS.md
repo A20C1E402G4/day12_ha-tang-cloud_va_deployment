@@ -275,14 +275,60 @@ The cost guard (`cost_guard.py`) protects against surprise LLM bills:
 When running 3 instances, the load balancer routes each request to a different container. If session data (conversation history) is stored in instance memory, a user's second request may land on a different instance that has no record of the first. Redis solves this by providing a shared store all instances read/write to.
 
 ### Exercise 5.2: Stateless test output
-```bash
-# Run:
-cd 05-scaling-reliability/production
-docker compose up --scale agent=3
-python test_stateless.py
 
-# Paste actual output here
 ```
+============================================================
+Stateless Scaling Demo
+============================================================
+
+Session ID: f46e1bfb-7c80-4c3e-889b-20e0d10f3225
+
+Request 1: [instance-401f61]
+  Q: What is Docker?
+  A: Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!...
+
+Request 2: [instance-538eea]
+  Q: Why do we need containers?
+  A: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé....
+
+Request 3: [instance-930565]
+  Q: What is Kubernetes?
+  A: Đây là câu trả lời từ AI agent (mock). Trong production, đây sẽ là response từ O...
+
+Request 4: [instance-401f61]
+  Q: How does load balancing work?
+  A: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé....
+
+Request 5: [instance-538eea]
+  Q: What is Redis used for?
+  A: Đây là câu trả lời từ AI agent (mock). Trong production, đây sẽ là response từ O...
+
+------------------------------------------------------------
+Total requests: 5
+Instances used: {'instance-401f61', 'instance-538eea', 'instance-930565'}
+✅ All requests served despite different instances!
+
+--- Conversation History ---
+Total messages: 10
+  [user]: What is Docker?...
+  [assistant]: Container là cách đóng gói app để chạy ở mọi nơi. Build once...
+  [user]: Why do we need containers?...
+  [assistant]: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đ...
+  [user]: What is Kubernetes?...
+  [assistant]: Đây là câu trả lời từ AI agent (mock). Trong production, đây...
+  [user]: How does load balancing work?...
+  [assistant]: Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đ...
+  [user]: What is Redis used for?...
+  [assistant]: Đây là câu trả lời từ AI agent (mock). Trong production, đây...
+
+✅ Session history preserved across all instances via Redis!
+```
+
+Key observations:
+- All 3 instances (`instance-401f61`, `instance-538eea`, `instance-930565`) handled requests round-robin
+- The same session ID was used across all 5 requests
+- Full conversation history (10 messages) was preserved despite each request hitting a different instance
+- This proves Redis-backed stateless design works correctly at scale
 
 ### Exercise 5.3: SIGTERM graceful shutdown
 1. Platform sends `SIGTERM` to container
