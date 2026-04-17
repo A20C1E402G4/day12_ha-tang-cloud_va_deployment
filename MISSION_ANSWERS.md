@@ -163,66 +163,106 @@ Key design decisions:
 
 ## Part 3: Cloud Deployment
 
-*(To be completed — see CLAUDE.md tasks)*
+### Exercise 3.1: Deployment Details
 
-- Deployed URL: `https://_____.railway.app`
-- Platform: Railway / Render / Cloud Run
-- Screenshot: `screenshots/deployment.png`
+- **Deployed URL:** `https://delightful-ambition-production-37e2.up.railway.app`
+- **Platform chosen:** Railway
+- **Why Railway:** Fastest zero-config deployment — `railway init` + `railway up` reads `railway.toml` automatically, assigns a public HTTPS domain, and injects `$PORT` without any manual setup. No credit card required for hobby tier.
+
+### Exercise 3.2: Verification
+
+```bash
+# Root endpoint — confirms app is running
+curl https://delightful-ambition-production-37e2.up.railway.app/
+# {"message":"AI Agent running on Railway!","docs":"/docs","health":"/health"}
+
+# Health check
+curl https://delightful-ambition-production-37e2.up.railway.app/health
+# {"status":"ok","uptime_seconds":804.8,"platform":"Railway","timestamp":"2026-04-17T08:16:33.562930+00:00"}
+```
+
+### Exercise 3.3: Deployment Config (`railway.toml`)
+
+Key settings that made it work:
+- `builder = "nixpacks"` — auto-detects Python, installs deps from `requirements.txt`
+- `startCommand` uses `$PORT` — Railway injects the assigned port at runtime
+- `healthcheckPath = "/health"` — Railway restarts the container if this stops returning 200
 
 ---
 
 ## Part 4: API Security
 
-*(To be completed — paste actual curl outputs)*
+> **Note:** This app uses **JWT authentication**.
+> Flow: `POST /auth/token` → get Bearer token → include in every request.
 
 ### Exercise 4.1: Auth required (401)
-```bash
-# Command:
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "hello"}'
 
-# Expected output:
-# {"detail":"Invalid or missing API key. Include header: X-API-Key: <key>"}
-# HTTP 401
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d '{"question":"hello"}'
+```
+
+Output:
+```
+{"detail":"Authentication required. Include: Authorization: Bearer <token>"}
+HTTP 401
 ```
 
 ### Exercise 4.2: Auth works (200)
-```bash
-# Command:
-curl -X POST http://localhost:8000/ask \
-  -H "X-API-Key: secret-key" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "hello"}'
 
-# Expected output:
-# {"question":"hello","answer":"...","model":"gpt-4o-mini","timestamp":"..."}
-# HTTP 200
+```bash
+# Step 1 — get JWT token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/token -H "Content-Type: application/json" -d '{"username":"student","password":"demo123"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+# Step 2 — use token
+curl -s -w "\nHTTP %{http_code}\n" -X POST http://localhost:8000/ask -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question":"what is docker?"}'
+```
+
+Output:
+```
+{"question":"what is docker?","answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!","usage":{"requests_remaining":9,"budget_remaining_usd":1.9e-05}}
+HTTP 200
 ```
 
 ### Exercise 4.3: Rate limiting (429)
-```bash
-# Command:
-for i in {1..15}; do
-  curl -s -o /dev/null -w "%{http_code}\n" \
-    -X POST http://localhost:8000/ask \
-    -H "X-API-Key: secret-key" \
-    -H "Content-Type: application/json" \
-    -d '{"question": "test"}'
-done
 
-# Expected: first 10 return 200, requests 11-15 return 429
+```bash
+for i in {1..15}; do curl -s -o /dev/null -w "Request $i: %{http_code}\n" -X POST http://localhost:8000/ask -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question":"test"}'; done
 ```
+
+Output:
+```
+Request 1: 200
+Request 2: 200
+Request 3: 200
+Request 4: 200
+Request 5: 200
+Request 6: 200
+Request 7: 200
+Request 8: 200
+Request 9: 200
+Request 10: 200
+Request 11: 429
+Request 12: 429
+Request 13: 429
+Request 14: 429
+Request 15: 429
+```
+
+First 10 requests succeed (sliding window limit = 10/min per user). Requests 11–15 return 429 with `Retry-After` header.
 
 ### Exercise 4.4: Cost guard explanation
 
-The cost guard tracks cumulative token spending per day:
-- Input token cost: `(tokens / 1000) × $0.00015`
-- Output token cost: `(tokens / 1000) × $0.0006`
-- Daily budget default: `$10.00`
-- At 100% budget: returns `503 Service Unavailable`
-- Resets at midnight (day string comparison)
-- In production: replace in-memory `_daily_cost` with Redis for multi-instance accuracy
+The cost guard (`cost_guard.py`) protects against surprise LLM bills:
+
+- **Token cost formula:**
+  - Input: `(tokens / 1000) × $0.00015` (GPT-4o-mini rate)
+  - Output: `(tokens / 1000) × $0.0006`
+  - Tokens estimated as `len(text.split()) × 2`
+- **Per-user daily budget:** $1.00 — returns `402 Payment Required` when exhausted
+- **Global daily budget:** $10.00 — returns `503 Service Unavailable` when exhausted
+- **Warning threshold:** logs a warning at 80% usage
+- **Reset:** compares `time.strftime("%Y-%m-%d")` — resets automatically at midnight UTC
+- **Multi-instance note:** in-memory state means each instance tracks separately; production should use Redis for accurate global tracking
 
 ---
 
