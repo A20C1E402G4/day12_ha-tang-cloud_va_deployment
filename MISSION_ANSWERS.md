@@ -1,6 +1,7 @@
 # Day 12 Lab — Mission Answers
 
-> **Student:** dduyanhhoang@gmail.com  
+> **Student:** Hoang Dinh Duy Anh
+> **Student ID:** 2A202600064
 > **Date:** 17/4/2026
 
 ---
